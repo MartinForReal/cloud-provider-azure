@@ -18,7 +18,6 @@ package provider
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,9 +28,9 @@ import (
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/go-autorest/autorest"
-	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 
+	"github.com/jongio/azidext/go/azidext"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -48,6 +47,7 @@ import (
 	cloudnodeutil "k8s.io/cloud-provider/node/helpers"
 	nodeutil "k8s.io/component-helpers/node/util"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/yaml"
 
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azclient/configloader"
@@ -75,9 +75,6 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/vmssvmclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/zoneclient"
-
-	"sigs.k8s.io/yaml"
-
 	azcache "sigs.k8s.io/cloud-provider-azure/pkg/cache"
 	"sigs.k8s.io/cloud-provider-azure/pkg/consts"
 	ratelimitconfig "sigs.k8s.io/cloud-provider-azure/pkg/provider/config"
@@ -669,42 +666,15 @@ func (az *Cloud) InitializeCloudFromConfig(ctx context.Context, config *Config, 
 			return err
 		}
 	}
-	servicePrincipalToken, err := ratelimitconfig.GetServicePrincipalToken(&config.AzureAuthConfig, env, env.ServiceManagementEndpoint)
-	if errors.Is(err, ratelimitconfig.ErrorNoAuth) {
-		// Only controller-manager would lazy-initialize from secret, and credentials are required for such case.
-		if fromSecret {
-			err := fmt.Errorf("no credentials provided for Azure cloud provider")
-			klog.Fatal(err)
-			return err
-		}
-
-		// No credentials provided, useInstanceMetadata should be enabled for Kubelet.
-		// TODO(feiskyer): print different error message for Kubelet and controller-manager, as they're
-		// requiring different credential settings.
-		if !config.UseInstanceMetadata && config.CloudConfigType == configloader.CloudConfigTypeFile {
-			return fmt.Errorf("useInstanceMetadata must be enabled without Azure credentials")
-		}
-
-		klog.V(2).Infof("Azure cloud provider is starting without credentials")
-	} else if err != nil {
-		return err
-	}
-	// No credentials provided, InstanceMetadataService would be used for getting Azure resources.
-	// Note that this only applies to Kubelet, controller-manager should configure credentials for managing Azure resources.
-	if servicePrincipalToken == nil {
-		return nil
-	}
 
 	var authProvider *azclient.AuthProvider
 	authProvider, err = azclient.NewAuthProvider(&az.ARMClientConfig, &az.AzureAuthConfig.AzureAuthConfig)
 	if err != nil {
 		return err
 	}
-	// If uses network resources in different AAD Tenant, then prepare corresponding Service Principal Token for VM/VMSS client and network resources client
-	multiTenantServicePrincipalToken, networkResourceServicePrincipalToken, err := az.getAuthTokenInMultiTenantEnv(servicePrincipalToken, authProvider)
-	if err != nil {
-		return err
-	}
+	servicePrincipalToken := azidext.NewTokenCredentialAdapter(authProvider.GetAzIdentity(), []string{azidext.DefaultManagementScope})
+	multiTenantServicePrincipalToken := azidext.NewTokenCredentialAdapter(authProvider.GetMultiTenantIdentity(), []string{azidext.DefaultManagementScope})
+	networkResourceServicePrincipalToken := azidext.NewTokenCredentialAdapter(authProvider.GetNetworkAzIdentity(), []string{azidext.DefaultManagementScope})
 	az.configAzureClients(servicePrincipalToken, multiTenantServicePrincipalToken, networkResourceServicePrincipalToken)
 
 	if az.ComputeClientFactory == nil {
@@ -895,23 +865,6 @@ func (az *Cloud) setLBDefaults(config *Config) error {
 	return nil
 }
 
-func (az *Cloud) getAuthTokenInMultiTenantEnv(_ *adal.ServicePrincipalToken, authProvider *azclient.AuthProvider) (adal.MultitenantOAuthTokenProvider, adal.OAuthTokenProvider, error) {
-	var err error
-	var multiTenantOAuthToken adal.MultitenantOAuthTokenProvider
-	var networkResourceServicePrincipalToken adal.OAuthTokenProvider
-	if az.Config.UsesNetworkResourceInDifferentTenant() {
-		multiTenantOAuthToken, err = ratelimitconfig.GetMultiTenantServicePrincipalToken(&az.Config.AzureAuthConfig, &az.Environment, authProvider)
-		if err != nil {
-			return nil, nil, err
-		}
-		networkResourceServicePrincipalToken, err = ratelimitconfig.GetNetworkResourceServicePrincipalToken(&az.Config.AzureAuthConfig, &az.Environment, authProvider)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	return multiTenantOAuthToken, networkResourceServicePrincipalToken, nil
-}
-
 func (az *Cloud) setCloudProviderBackoffDefaults(config *Config) wait.Backoff {
 	// Conditionally configure resource request backoff
 	resourceRequestBackoff := wait.Backoff{
@@ -953,9 +906,9 @@ func (az *Cloud) setCloudProviderBackoffDefaults(config *Config) wait.Backoff {
 }
 
 func (az *Cloud) configAzureClients(
-	servicePrincipalToken *adal.ServicePrincipalToken,
-	multiTenantOAuthTokenProvider adal.MultitenantOAuthTokenProvider,
-	networkResourceServicePrincipalToken adal.OAuthTokenProvider) {
+	servicePrincipalToken autorest.Authorizer,
+	multiTenantServicePrincipalTokenAuthorizer autorest.Authorizer,
+	networkResourceServicePrincipalTokenAuthorizer autorest.Authorizer) {
 	azClientConfig := az.getAzureClientConfig(servicePrincipalToken)
 
 	// Prepare AzureClientConfig for all azure clients
@@ -988,8 +941,7 @@ func (az *Cloud) configAzureClients(
 	zoneClientConfig := azClientConfig.WithRateLimiter(nil)
 
 	// If uses network resources in different AAD Tenant, update Authorizer for VM/VMSS/VMAS client config
-	if multiTenantOAuthTokenProvider != nil {
-		multiTenantServicePrincipalTokenAuthorizer := autorest.NewMultiTenantServicePrincipalTokenAuthorizer(multiTenantOAuthTokenProvider)
+	if multiTenantServicePrincipalTokenAuthorizer != nil {
 
 		vmClientConfig.Authorizer = multiTenantServicePrincipalTokenAuthorizer
 		vmssClientConfig.Authorizer = multiTenantServicePrincipalTokenAuthorizer
@@ -998,8 +950,7 @@ func (az *Cloud) configAzureClients(
 	}
 
 	// If uses network resources in different AAD Tenant, update SubscriptionID and Authorizer for network resources client config
-	if networkResourceServicePrincipalToken != nil {
-		networkResourceServicePrincipalTokenAuthorizer := autorest.NewBearerAuthorizer(networkResourceServicePrincipalToken)
+	if networkResourceServicePrincipalTokenAuthorizer != nil {
 		routeClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
 		subnetClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
 		routeTableClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
@@ -1046,13 +997,13 @@ func (az *Cloud) configAzureClients(
 	}
 }
 
-func (az *Cloud) getAzureClientConfig(servicePrincipalToken *adal.ServicePrincipalToken) *azclients.ClientConfig {
+func (az *Cloud) getAzureClientConfig(servicePrincipalToken autorest.Authorizer) *azclients.ClientConfig {
 	azClientConfig := &azclients.ClientConfig{
 		CloudName:               az.Config.Cloud,
 		Location:                az.Config.Location,
 		SubscriptionID:          az.Config.SubscriptionID,
 		ResourceManagerEndpoint: az.Environment.ResourceManagerEndpoint,
-		Authorizer:              autorest.NewBearerAuthorizer(servicePrincipalToken),
+		Authorizer:              servicePrincipalToken,
 		Backoff:                 &retry.Backoff{Steps: 1},
 		DisableAzureStackCloud:  az.Config.DisableAzureStackCloud,
 		UserAgent:               az.Config.UserAgent,
