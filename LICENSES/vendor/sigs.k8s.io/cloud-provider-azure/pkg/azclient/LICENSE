@@ -1,4 +1,4 @@
-= vendor/google.golang.org/appengine licensed under: =
+= vendor/sigs.k8s.io/cloud-provider-azure/pkg/azclient licensed under: =
 
 
                                  Apache License
@@ -203,4 +203,4 @@
    See the License for the specific language governing permissions and
    limitations under the License.
 
-= vendor/google.golang.org/appengine/LICENSE 3b83ef96387f14655fc854ddc3c6bd57
+= vendor/sigs.k8s.io/cloud-provider-azure/pkg/azclient/LICENSE 3b83ef96387f14655fc854ddc3c6bd57
