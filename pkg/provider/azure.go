@@ -59,6 +59,7 @@ import (
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/loadbalancerclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatednszonegroupclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privateendpointclient"
+	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/privatelinkserviceclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/publicipclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/routetableclient"
 	"sigs.k8s.io/cloud-provider-azure/pkg/azureclients/storageaccountclient"
@@ -371,6 +372,7 @@ type Cloud struct {
 	AvailabilitySetsClient          vmasclient.Interface
 	privateendpointclient           privateendpointclient.Interface
 	privatednszonegroupclient       privatednszonegroupclient.Interface
+	PrivateLinkServiceClient        privatelinkserviceclient.Interface
 	ComputeClientFactory            azclient.ClientFactory
 	NetworkClientFactory            azclient.ClientFactory
 	AuthProvider                    *azclient.AuthProvider
@@ -981,7 +983,6 @@ func (az *Cloud) configAzureClients(
 	// But http.StatusNotFound is retriable because of ARM replication latency.
 	vmssVMClientConfig := azClientConfig.WithRateLimiter(az.Config.VirtualMachineScaleSetRateLimit)
 	vmssVMClientConfig.Backoff = vmssVMClientConfig.Backoff.WithNonRetriableErrors([]string{consts.VmssVMNotActiveErrorMessage}).WithRetriableHTTPStatusCodes([]int{http.StatusNotFound})
-	routeClientConfig := azClientConfig.WithRateLimiter(az.Config.RouteRateLimit)
 	subnetClientConfig := azClientConfig.WithRateLimiter(az.Config.SubnetsRateLimit)
 	routeTableClientConfig := azClientConfig.WithRateLimiter(az.Config.RouteTableRateLimit)
 	loadBalancerClientConfig := azClientConfig.WithRateLimiter(az.Config.LoadBalancerRateLimit)
@@ -1006,7 +1007,6 @@ func (az *Cloud) configAzureClients(
 	// If uses network resources in different AAD Tenant, update SubscriptionID and Authorizer for network resources client config
 	if networkResourceServicePrincipalToken != nil {
 		networkResourceServicePrincipalTokenAuthorizer := autorest.NewBearerAuthorizer(networkResourceServicePrincipalToken)
-		routeClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
 		subnetClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
 		routeTableClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
 		loadBalancerClientConfig.Authorizer = networkResourceServicePrincipalTokenAuthorizer
@@ -1014,7 +1014,6 @@ func (az *Cloud) configAzureClients(
 	}
 
 	if az.UsesNetworkResourceInDifferentSubscription() {
-		routeClientConfig.SubscriptionID = az.Config.NetworkResourceSubscriptionID
 		subnetClientConfig.SubscriptionID = az.Config.NetworkResourceSubscriptionID
 		routeTableClientConfig.SubscriptionID = az.Config.NetworkResourceSubscriptionID
 		loadBalancerClientConfig.SubscriptionID = az.Config.NetworkResourceSubscriptionID
