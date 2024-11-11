@@ -19,6 +19,7 @@ package azclient
 import (
 	"os"
 	"strings"
+	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 
@@ -37,6 +38,10 @@ type ARMClientConfig struct {
 	TenantID string `json:"tenantId,omitempty" yaml:"tenantId,omitempty"`
 	// The AAD Tenant ID for the Subscription that the network resources are deployed in.
 	NetworkResourceTenantID string `json:"networkResourceTenantID,omitempty" yaml:"networkResourceTenantID,omitempty"`
+	// Backoff retry limit
+	CloudProviderBackoffRetries int32 `json:"cloudProviderBackoffRetries,omitempty" yaml:"cloudProviderBackoffRetries,omitempty"`
+	// Backoff duration
+	CloudProviderBackoffDuration int `json:"cloudProviderBackoffDuration,omitempty" yaml:"cloudProviderBackoffDuration,omitempty"`
 }
 
 func (config *ARMClientConfig) GetTenantID() string {
@@ -59,6 +64,13 @@ func GetAzCoreClientOption(armConfig *ARMClientConfig) (*policy.ClientOptions, e
 			return nil, err
 		}
 		azCoreClientConfig.Cloud = *cloudConfig
+		if armConfig.CloudProviderBackoffDuration > 0 {
+			azCoreClientConfig.Retry.RetryDelay = time.Duration(armConfig.CloudProviderBackoffDuration) * time.Second
+		}
+		if armConfig.CloudProviderBackoffRetries > 0 {
+			azCoreClientConfig.Retry.MaxRetries = armConfig.CloudProviderBackoffRetries
+		}
+
 	}
 	return &azCoreClientConfig, nil
 }
