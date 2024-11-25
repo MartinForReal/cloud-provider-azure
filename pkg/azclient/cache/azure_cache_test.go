@@ -82,7 +82,7 @@ func newFakeCache[Type interface{}](t *testing.T) (*fakeDataSource[Type], *Timed
 		sem: *semaphore.NewWeighted(1),
 	}
 	getter := dataSource.get
-	cache, err := NewTimedCache(fakeCacheTTL, getter, false)
+	cache, err := NewTimedCache(fakeCacheTTL, getter)
 	assert.NoError(t, err)
 	return dataSource, cache.(*TimedCache[Type])
 }
@@ -117,7 +117,7 @@ func TestCacheGet(t *testing.T) {
 	for _, c := range cases {
 		dataSource, cache := newFakeCache[fakeDataObj](t)
 		dataSource.set(c.data)
-		val, err := cache.GetWithDeepCopy(context.TODO(), c.key, CacheReadTypeDefault)
+		val, err := cache.Get(context.TODO(), c.key, CacheReadTypeDefault)
 		assert.NoError(t, err, c.name)
 		assert.Equal(t, c.expected, val, c.name)
 	}
@@ -128,16 +128,16 @@ func TestCacheGetError(t *testing.T) {
 	getter := func(_ context.Context, _ string) (*armcompute.VirtualMachine, error) {
 		return nil, getError
 	}
-	cache, err := NewTimedCache(fakeCacheTTL, getter, false)
+	cache, err := NewTimedCache(fakeCacheTTL, getter)
 	assert.NoError(t, err)
 
-	val, err := cache.GetWithDeepCopy(context.TODO(), "key", CacheReadTypeDefault)
+	val, err := cache.Get(context.TODO(), "key", CacheReadTypeDefault)
 	assert.Error(t, err)
 	assert.Equal(t, getError, err)
 	assert.Nil(t, val)
 }
 
-func TestCacheGetWithDeepCopy(t *testing.T) {
+func TestCacheGetWithCopy(t *testing.T) {
 	changed, unchanged := "changed", "unchanged"
 	valFake := &fakeDataObj{unchanged}
 	cases := []struct {
@@ -159,7 +159,7 @@ func TestCacheGetWithDeepCopy(t *testing.T) {
 			dataSource, cache := newFakeCache[fakeDataObj](t)
 			dataSource.set(c.data)
 			cache.Set(c.key, valFake)
-			val, err := cache.GetWithDeepCopy(context.TODO(), c.key, CacheReadTypeDefault)
+			val, err := cache.Get(context.TODO(), c.key, CacheReadTypeDefault)
 			assert.NoError(t, err)
 			assert.Equal(t, c.expected, val.Data)
 
@@ -179,13 +179,13 @@ func TestCacheDelete(t *testing.T) {
 	dataSource, cache := newFakeCache[fakeDataObj](t)
 	dataSource.set(data)
 
-	v, err := cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err := cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	dataSource.set(nil)
 	_ = cache.Delete(testKey)
-	v, err = cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err = cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Nil(t, v, "cache should get nil after data is removed")
@@ -199,13 +199,13 @@ func TestCacheExpired(t *testing.T) {
 	dataSource, cache := newFakeCache[fakeDataObj](t)
 	dataSource.set(data)
 
-	v, err := cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err := cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	time.Sleep(fakeCacheTTL)
-	v, err = cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err = cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data even after expired")
@@ -219,13 +219,13 @@ func TestCacheAllowUnsafeRead(t *testing.T) {
 	dataSource, cache := newFakeCache[fakeDataObj](t)
 	dataSource.set(data)
 
-	v, err := cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err := cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
 	time.Sleep(fakeCacheTTL)
-	v, err = cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeUnsafe)
+	v, err = cache.Get(context.TODO(), testKey, CacheReadTypeUnsafe)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should return expired as allow unsafe read is allowed")
@@ -245,10 +245,10 @@ func TestCacheNoConcurrentGet(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+			_, _ = cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 		}()
 	}
-	v, err := cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err := cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	wg.Wait()
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
@@ -302,12 +302,12 @@ func TestCacheForceRefresh(t *testing.T) {
 	dataSource, cache := newFakeCache[fakeDataObj](t)
 	dataSource.set(data)
 
-	v, err := cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeDefault)
+	v, err := cache.Get(context.TODO(), testKey, CacheReadTypeDefault)
 	assert.NoError(t, err)
 	assert.Equal(t, 1, dataSource.called)
 	assert.Equal(t, val, v, "cache should get correct data")
 
-	v, err = cache.GetWithDeepCopy(context.TODO(), testKey, CacheReadTypeForceRefresh)
+	v, err = cache.Get(context.TODO(), testKey, CacheReadTypeForceRefresh)
 	assert.NoError(t, err)
 	assert.Equal(t, 2, dataSource.called)
 	assert.Equal(t, val, v, "should refetch unexpired data as forced refresh")

@@ -16,7 +16,7 @@
 
 package generator
 
-import "html/template"
+import "text/template"
 
 type ClientGenConfig struct {
 	Verbs                     []string `marker:",optional"`

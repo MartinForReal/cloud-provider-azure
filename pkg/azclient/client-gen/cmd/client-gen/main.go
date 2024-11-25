@@ -45,6 +45,7 @@ var (
 		"clientgen":        generator.Generator{},
 		"mockgen":          generator.MockGenerator{},
 		"clientfactorygen": generator.ClientFactoryGenerator{},
+		"repositorygen":    generator.RepositoryGenerator{},
 	}
 	// allOutputRules defines the list of all known output rules, giving
 	// them names for use on the command line.
