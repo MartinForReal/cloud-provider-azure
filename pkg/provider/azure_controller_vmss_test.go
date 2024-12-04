@@ -144,7 +144,7 @@ func TestAttachDiskWithVMSS(t *testing.T) {
 			options := AttachDiskOptions{
 				Lun:                     int32(i),
 				DiskName:                diskName,
-				CachingMode:             compute.CachingTypesReadWrite,
+				CachingMode:             armcompute.CachingTypesReadWrite,
 				DiskEncryptionSetID:     "",
 				WriteAcceleratorEnabled: true,
 			}

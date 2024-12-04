@@ -114,7 +114,7 @@ type VMSet interface {
 
 // AttachDiskOptions attach disk options
 type AttachDiskOptions struct {
-	CachingMode             compute.CachingTypes
+	CachingMode             armcompute.CachingTypes
 	DiskName                string
 	DiskEncryptionSetID     string
 	WriteAcceleratorEnabled bool

@@ -87,7 +87,7 @@ func (fs *FlexScaleSet) AttachDisk(ctx context.Context, nodeName types.NodeName,
 			compute.DataDisk{
 				Name:                    &opt.DiskName,
 				Lun:                     &opt.Lun,
-				Caching:                 opt.CachingMode,
+				Caching:                 compute.CachingTypes(opt.CachingMode),
 				CreateOption:            "attach",
 				ManagedDisk:             managedDisk,
 				WriteAcceleratorEnabled: ptr.To(opt.WriteAcceleratorEnabled),

@@ -115,7 +115,7 @@ func TestAttachDiskWithVmssFlex(t *testing.T) {
 		options := AttachDiskOptions{
 			Lun:                     1,
 			DiskName:                "diskname",
-			CachingMode:             compute.CachingTypesReadOnly,
+			CachingMode:             armcompute.CachingTypesReadOnly,
 			DiskEncryptionSetID:     "",
 			WriteAcceleratorEnabled: false,
 		}

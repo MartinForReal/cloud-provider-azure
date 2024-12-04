@@ -124,7 +124,7 @@ func TestStandardAttachDisk(t *testing.T) {
 		options := AttachDiskOptions{
 			Lun:                     0,
 			DiskName:                "disk-name2",
-			CachingMode:             compute.CachingTypesReadOnly,
+			CachingMode:             armcompute.CachingTypesReadOnly,
 			DiskEncryptionSetID:     "",
 			WriteAcceleratorEnabled: false,
 		}
